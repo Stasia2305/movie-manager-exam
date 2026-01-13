@@ -37,17 +37,6 @@ public class DatabaseConnection {
         }
     }
 
-    public static void initializeDatabaseAsync() {
-        new Thread(() -> {
-            try {
-                initializeDatabase();
-            } catch (SQLException e) {
-                System.err.println("Warning: Failed to initialize database tables: " + e.getMessage());
-                e.printStackTrace();
-            }
-        }).start();
-    }
-
     private static synchronized void initializeDatabaseInternal() throws SQLException {
         if (initialized) {
             return;
@@ -56,27 +45,30 @@ public class DatabaseConnection {
         try (Connection conn = connectionManager.getConnection();
              Statement stmt = conn.createStatement()) {
 
-            stmt.execute("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'categories') " +
-                    "CREATE TABLE categories (" +
-                    "id INT PRIMARY KEY IDENTITY(1,1)," +
-                    "name NVARCHAR(100) NOT NULL UNIQUE)");
+            if (!tableExists(stmt, "categories")) {
+                stmt.execute("CREATE TABLE categories (" +
+                        "id INT PRIMARY KEY AUTOINCREMENT," +
+                        "name NVARCHAR(100) NOT NULL UNIQUE)");
+            }
 
-            stmt.execute("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'movies') " +
-                    "CREATE TABLE movies (" +
-                    "id INT PRIMARY KEY IDENTITY(1,1)," +
-                    "title NVARCHAR(255) NOT NULL," +
-                    "imdb_rating FLOAT," +
-                    "personal_rating INT," +
-                    "file_path NVARCHAR(500) NOT NULL," +
-                    "last_view DATETIME)");
+            if (!tableExists(stmt, "movies")) {
+                stmt.execute("CREATE TABLE movies (" +
+                        "id INT PRIMARY KEY AUTOINCREMENT," +
+                        "title NVARCHAR(255) NOT NULL," +
+                        "imdb_rating FLOAT," +
+                        "personal_rating INT," +
+                        "file_path NVARCHAR(500) NOT NULL," +
+                        "last_view DATETIME)");
+            }
 
-            stmt.execute("IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'movie_category') " +
-                    "CREATE TABLE movie_category (" +
-                    "movie_id INT NOT NULL," +
-                    "category_id INT NOT NULL," +
-                    "PRIMARY KEY (movie_id, category_id)," +
-                    "FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE," +
-                    "FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE)");
+            if (!tableExists(stmt, "movie_category")) {
+                stmt.execute("CREATE TABLE movie_category (" +
+                        "movie_id INT NOT NULL," +
+                        "category_id INT NOT NULL," +
+                        "PRIMARY KEY (movie_id, category_id)," +
+                        "FOREIGN KEY (movie_id) REFERENCES movies(id) ON DELETE CASCADE," +
+                        "FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE)");
+            }
 
             try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM categories")) {
                 if (rs.next() && rs.getInt(1) == 0) {
@@ -99,6 +91,13 @@ public class DatabaseConnection {
             initialized = true;
         } catch (SQLServerException e) {
             throw new SQLException("Failed to initialize database: " + e.getMessage(), e);
+        }
+    }
+
+    private static boolean tableExists(Statement stmt, String tableName) throws SQLException {
+        try (ResultSet rs = stmt.executeQuery(
+                "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = '" + tableName + "'")) {
+            return rs.next() && rs.getInt(1) > 0;
         }
     }
 }
