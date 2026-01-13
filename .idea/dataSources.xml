@@ -2,7 +2,7 @@
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
     <data-source source="LOCAL" name="movie_manager" uuid="f60695f0-3501-4a9a-b4a8-f77471889354">
-      <driver-ref>sqlite.xerial</driver-ref>
+      <driver-ref>a2919df4-f275-4e84-a6ee-b1454aba54e9</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.sqlite.JDBC</jdbc-driver>
       <jdbc-url>jdbc:sqlite:$PROJECT_DIR$/movie_manager.db</jdbc-url>

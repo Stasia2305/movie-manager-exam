@@ -1,13 +1,16 @@
 package com.moviemanagerexam.controller;
 
 import com.moviemanagerexam.dao.CategoryDAO;
+import com.moviemanagerexam.dao.DatabaseConnection;
 import com.moviemanagerexam.dao.MovieCategoryDAO;
 import com.moviemanagerexam.dao.MovieDAO;
 import com.moviemanagerexam.model.Category;
 import com.moviemanagerexam.model.Movie;
 import com.moviemanagerexam.util.AlertHelper;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.concurrent.Task;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
 import javafx.scene.control.cell.PropertyValueFactory;
@@ -43,9 +46,8 @@ public class MainController {
     @FXML private Button addButton;
     @FXML private Button deleteButton;
     @FXML private Button editButton;
+    @FXML private Button editRatingButton;
     @FXML private Button playButton;
-    @FXML private Button addCategoryButton;
-    @FXML private Button deleteCategoryButton;
 
     private MovieDAO movieDAO;
     private CategoryDAO categoryDAO;
@@ -84,11 +86,23 @@ public class MainController {
         minRatingSpinner.setValueFactory(valueFactory);
         minRatingSpinner.setEditable(true);
 
-        loadMovies();
-        loadCategories();
+        Task<Void> loadDataTask = new Task<Void>() {
+            @Override
+            protected Void call() {
+                try {
+                    DatabaseConnection.initializeDatabase();
+                    loadMovies();
+                    loadCategories();
+                    Platform.runLater(MainController.this::checkMoviesForDeletion);
+                } catch (Exception e) {
+                    Platform.runLater(() -> AlertHelper.showError("Database Error", "Failed to load data from database: " + e.getMessage()));
+                }
+                return null;
+            }
+        };
 
         setupEventHandlers();
-        checkMoviesForDeletion();
+        new Thread(loadDataTask).start();
     }
 
     private void checkMoviesForDeletion() {
@@ -122,77 +136,36 @@ public class MainController {
         addButton.setOnAction(event -> addMovie());
         addByLinkButton.setOnAction(event -> addMovieByLink());
         editButton.setOnAction(event -> editMovie());
+        editRatingButton.setOnAction(event -> editRating());
         deleteButton.setOnAction(event -> deleteMovie());
-        addCategoryButton.setOnAction(event -> addCategory());
-        deleteCategoryButton.setOnAction(event -> deleteCategory());
-    }
-
-    private void addCategory() {
-        TextInputDialog dialog = new TextInputDialog();
-        dialog.setTitle("Add Category");
-        dialog.setHeaderText("Create a new movie category");
-        dialog.setContentText("Category name:");
-
-        dialog.showAndWait().ifPresent(name -> {
-            if (name.trim().isEmpty()) {
-                AlertHelper.showError("Invalid Name", "Category name cannot be empty.");
-                return;
-            }
-            try {
-                categoryDAO.addCategory(name.trim());
-                loadCategories();
-            } catch (SQLException e) {
-                AlertHelper.showError("Database Error", "Failed to add category: " + e.getMessage());
-            }
-        });
-    }
-
-    private void deleteCategory() {
-        try {
-            List<Category> categories = categoryDAO.getAllCategories();
-            ChoiceDialog<Category> dialog = new ChoiceDialog<>(null, categories);
-            dialog.setTitle("Delete Category");
-            dialog.setHeaderText("Select a category to delete");
-            dialog.setContentText("Category:");
-
-            dialog.showAndWait().ifPresent(selected -> {
-                boolean confirmed = AlertHelper.showConfirmation("Delete Category", "Are you sure you want to delete category: " + selected.name() + "?");
-                if (confirmed) {
-                    try {
-                        categoryDAO.deleteCategory(selected.id());
-                        loadCategories();
-                    } catch (SQLException e) {
-                        AlertHelper.showError("Database Error", "Failed to delete category: " + e.getMessage());
-                    }
-                }
-            });
-        } catch (SQLException e) {
-            AlertHelper.showError("Database Error", "Failed to load categories: " + e.getMessage());
-        }
     }
 
     private void loadMovies() {
         try {
             List<Movie> movies = movieDAO.getAllMovies();
-            allMovies.setAll(movies);
-            tableView.setItems(allMovies);
+            Platform.runLater(() -> {
+                allMovies.setAll(movies);
+                tableView.setItems(allMovies);
+            });
         } catch (SQLException e) {
-            AlertHelper.showError("Database Error", "Failed to load movies: " + e.getMessage());
+            Platform.runLater(() -> AlertHelper.showError("Database Error", "Failed to load movies: " + e.getMessage()));
         }
     }
 
     private void loadCategories() {
         try {
             List<Category> categories = categoryDAO.getAllCategories();
-            categoryFilterMenu.getItems().clear();
-            for (Category category : categories) {
-                CheckMenuItem item = new CheckMenuItem(category.name());
-                item.setUserData(category);
-                item.selectedProperty().addListener((obs, old, val) -> filterMovies());
-                categoryFilterMenu.getItems().add(item);
-            }
+            Platform.runLater(() -> {
+                categoryFilterMenu.getItems().clear();
+                for (Category category : categories) {
+                    CheckMenuItem item = new CheckMenuItem(category.name());
+                    item.setUserData(category);
+                    item.selectedProperty().addListener((obs, old, val) -> filterMovies());
+                    categoryFilterMenu.getItems().add(item);
+                }
+            });
         } catch (Exception e) {
-            AlertHelper.showError("Database Error", "Failed to load categories: " + e.getMessage());
+            Platform.runLater(() -> AlertHelper.showError("Database Error", "Failed to load categories: " + e.getMessage()));
         }
     }
 
@@ -425,6 +398,36 @@ public class MainController {
                 loadMovies();
             } catch (SQLException e) {
                 AlertHelper.showError("Database Error", "Failed to update movie: " + e.getMessage());
+            }
+        });
+    }
+
+    private void editRating() {
+        Movie selectedMovie = tableView.getSelectionModel().getSelectedItem();
+        if (selectedMovie == null) {
+            AlertHelper.showWarning("No selection", "Please select a movie to edit the rating.");
+            return;
+        }
+
+        TextInputDialog ratingDialog = new TextInputDialog(String.valueOf(selectedMovie.getPersonalRating()));
+        ratingDialog.setTitle("Edit Rating");
+        ratingDialog.setHeaderText("Update personal rating for " + selectedMovie.getTitle());
+        ratingDialog.setContentText("Rating (0-10):");
+        ratingDialog.showAndWait().ifPresent(newRatingStr -> {
+            try {
+                int newRating = Integer.parseInt(newRatingStr);
+                if (newRating < 0 || newRating > 10) {
+                    AlertHelper.showWarning("Invalid Rating", "Please enter a rating between 0 and 10.");
+                    return;
+                }
+                selectedMovie.setPersonalRating(newRating);
+                movieDAO.updateMovie(selectedMovie);
+                loadMovies();
+                AlertHelper.showInfo("Success", "Rating updated successfully.");
+            } catch (NumberFormatException e) {
+                AlertHelper.showWarning("Invalid Input", "Please enter a valid number.");
+            } catch (SQLException e) {
+                AlertHelper.showError("Database Error", "Failed to update rating: " + e.getMessage());
             }
         });
     }
